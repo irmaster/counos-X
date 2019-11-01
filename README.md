@@ -26,6 +26,8 @@ Official Nodes
 
 95.216.250.34	
 
+95.216.240.82
+
 Block Explorer
 -------------
 
