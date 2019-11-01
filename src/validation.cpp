@@ -4,8 +4,9 @@
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <validation.h>
-
+#include <core_io.h>
 #include <arith_uint256.h>
+#include <atomic>
 #include <chain.h>
 #include <chainparams.h>
 #include <checkpoints.h>
@@ -15,6 +16,7 @@
 #include <consensus/tx_verify.h>
 #include <consensus/validation.h>
 #include <cuckoocache.h>
+#include <future>
 #include <hash.h>
 #include <index/txindex.h>
 #include <policy/fees.h>
@@ -29,6 +31,7 @@
 #include <script/sigcache.h>
 #include <script/standard.h>
 #include <shutdown.h>
+#include <sstream>
 #include <timedata.h>
 #include <tinyformat.h>
 #include <txdb.h>
@@ -41,18 +44,72 @@
 #include <validationinterface.h>
 #include <warnings.h>
 
-#include <future>
-#include <sstream>
-
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/thread.hpp>
-
+#include <curl/curl.h>
+#include <curl/easy.h>
+#include <univalue.h>
 #if defined(NDEBUG)
 # error "CounosX cannot be compiled without assertions."
 #endif
 
 #define MICRO 0.000001
 #define MILLI 0.001
+
+using namespace std;
+size_t write_data(void* ptr, size_t size, size_t nmemb, void* stream)
+{
+    string data((const char*)ptr, (size_t)size * nmemb);
+    *((stringstream*)stream) << data << endl;
+    return size * nmemb;
+}
+/**
+ * A non-threadsafe simple libcURL-easy based HTTP downloader
+ * Written by Uli Köhler (techoverflow.net)
+ * Published under CC0 1.0 Universal (public domain)
+
+ */
+class HTTPDownloader
+{
+public:
+    HTTPDownloader()
+    {
+        curl = curl_easy_init();
+    }
+    ~HTTPDownloader()
+    {
+        curl_easy_cleanup(curl);
+    }
+    /**
+     * Download a file using HTTP GET and store in in a std::string
+     * @param url The URL to download
+     * @return The download result
+     */
+
+    std::string download(const std::string& url)
+    {
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        /* example.com is redirected, so we tell libcurl to follow redirection */
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1); //Prevent "longjmp causes uninitialized stack frame" bug
+        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "deflate");
+        std::stringstream out;
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &out);
+        /* Perform the request, res will get the return code */
+        CURLcode res = curl_easy_perform(curl);
+        /* Check for errors */
+        if (res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                curl_easy_strerror(res));
+        }
+        return out.str();
+    }
+
+private:
+    void* curl;
+};
+
 
 /**
  * Global state
@@ -187,6 +244,7 @@ public:
     void PruneBlockIndexCandidates();
 
     void UnloadBlockIndex();
+    int GetCOINBASE_MATURITY() const;
 
 private:
     bool ActivateBestChainStep(CValidationState& state, const CChainParams& chainparams, CBlockIndex* pindexMostWork, const std::shared_ptr<const CBlock>& pblock, bool& fInvalidFound, ConnectTrace& connectTrace);
@@ -274,6 +332,7 @@ namespace {
     std::set<int> setDirtyFileInfo;
 } // anon namespace
 
+  
 CBlockIndex* FindForkInGlobalIndex(const CChain& chain, const CBlockLocator& locator)
 {
     AssertLockHeld(cs_main);
@@ -310,7 +369,16 @@ static void FindFilesToPruneManual(std::set<int>& setFilesToPrune, int nManualPr
 static void FindFilesToPrune(std::set<int>& setFilesToPrune, uint64_t nPruneAfterHeight);
 bool CheckInputs(const CTransaction& tx, CValidationState &state, const CCoinsViewCache &inputs, bool fScriptChecks, unsigned int flags, bool cacheSigStore, bool cacheFullScriptStore, PrecomputedTransactionData& txdata, std::vector<CScriptCheck> *pvChecks = nullptr);
 static FILE* OpenUndoFile(const CDiskBlockPos &pos, bool fReadOnly = false);
+int GetCOINBASE_MATURITY()  
+{
+    const CChainParams& chainparams = Params();
+    CBlockIndex* pindex= Checkpoints::GetLastCheckpoint( chainparams.Checkpoints());
+    // Get Coinbas maturity based on hieght of coin base.
+    if (!pindex || !chainActive.Contains(pindex))
+           return FIRST_COINBASE_MATURITY;
 
+    return COINBASE_MATURITY;
+}
 bool CheckFinalTx(const CTransaction &tx, int flags)
 {
     AssertLockHeld(cs_main);
@@ -1159,7 +1227,29 @@ bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const CBlockIndex* pindex
     return ReadRawBlockFromDisk(block, block_pos, message_start);
 }
 
-CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
+bool isInTrustNode(const std::string& miner, int nHeight, int typeOfCheck)
+{
+    // Trust node will be manage outside of code, but at first they must have at least 500,000 CCA
+    if ((typeOfCheck == 2 && nHeight < HeightOnlyTrustNodeCanMine) || (typeOfCheck == 2 && miner == "DEF"))
+        return true;
+    HTTPDownloader downloader;
+    bool isTrust = false;
+    //std::string URL;
+    //sprintf(URL,)
+    std::string trustnodes = downloader.download("http://trust.counos.io/api/v1/ccxx/nodes/trusted?current_height=" + std::to_string(nHeight));
+    if (typeOfCheck == 2) // Valid Miner
+    {
+        trustnodes = downloader.download("http://trust.counos.io/api/v1/ccxx/nodes/valid?current_height=" + std::to_string(nHeight));
+    }
+    if (trustnodes.find(miner) != std::string::npos) {
+        isTrust = true;
+        LogPrintf("Check Trust Nodes :: Current Trust Nodes = %s , %s\n", trustnodes, miner);
+    }
+
+
+    return isTrust;
+}
+CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams, const std::string& minerAddress)
 {
     int halvings = nHeight / consensusParams.nSubsidyHalvingInterval;
     // Force block reward to zero when right shift is undefined.
@@ -1167,10 +1257,14 @@ CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams)
 	{
 		const CBlockIndex* pindex = chainActive.Tip(); 
 	    int64_t timeDiff =pindex->GetBlockTime() - pindex->pprev->GetBlockTime();
-		if( timeDiff >= 2*60 )
-			return 0.035 * COIN;
-		else
-		   return 0;
+        bool fullReward = false;
+        if (nHeight < 70000 || isInTrustNode(minerAddress, nHeight, 1))
+              fullReward = true;
+        if (timeDiff >= 2 * 60 && fullReward)
+                return 0.035 * COIN;
+            else
+                return 0;
+        
 	}
 
     CAmount nSubsidy = 30000 * COIN;
@@ -1991,6 +2085,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int64_t nSigOpsCost = 0;
     blockundo.vtxundo.reserve(block.vtx.size() - 1);
     std::vector<PrecomputedTransactionData> txdata;
+    std::string miner = "DEF";
     txdata.reserve(block.vtx.size()); // Required so that pointers to individual PrecomputedTransactionData don't get invalidated
     for (unsigned int i = 0; i < block.vtx.size(); i++)
     {
@@ -2023,7 +2118,28 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
                                  REJECT_INVALID, "bad-txns-nonfinal");
             }
         }
+        if (tx.IsCoinBase()) {
+            try {
+                UniValue out(UniValue::VOBJ);
+                ScriptPubKeyToUniv(tx.vout[0].scriptPubKey, out, true);
 
+                UniValue u = find_value(out, "addresses");
+                UniValue uv = u.getValues()[0];
+                miner = uv.get_str();
+            } catch (exception& e) {
+                try {
+                    UniValue out(UniValue::VOBJ);
+                    ScriptPubKeyToUniv(tx.vout[1].scriptPubKey, out, true);
+
+                    UniValue u = find_value(out, "addresses");
+                    UniValue uv = u.getValues()[0];
+                    miner = uv.get_str();
+                } catch (exception& e) {
+                }
+            }
+
+            //LogPrintf("miner address :%$ /n",miner);
+        }
         // GetTransactionSigOpCost counts 3 types of sigops:
         // * legacy (always)
         // * p2sh (when P2SH enabled in flags and excludes coinbase)
@@ -2053,12 +2169,32 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
     int64_t nTime3 = GetTimeMicros(); nTimeConnect += nTime3 - nTime2;
     LogPrint(BCLog::BENCH, "      - Connect %u transactions: %.2fms (%.3fms/tx, %.3fms/txin) [%.2fs (%.2fms/blk)]\n", (unsigned)block.vtx.size(), MILLI * (nTime3 - nTime2), MILLI * (nTime3 - nTime2) / block.vtx.size(), nInputs <= 1 ? 0 : MILLI * (nTime3 - nTime2) / (nInputs-1), nTimeConnect * MICRO, nTimeConnect * MILLI / nBlocksTotal);
 
-    CAmount blockReward = nFees + GetBlockSubsidy(pindex->nHeight, chainparams.GetConsensus());
+    CAmount blockReward = nFees + GetBlockSubsidy(pindex->nHeight, chainparams.GetConsensus(),miner);
     if (block.vtx[0]->GetValueOut() > blockReward)
         return state.DoS(100,
                          error("ConnectBlock(): coinbase pays too much (actual=%d vs limit=%d)",
                                block.vtx[0]->GetValueOut(), blockReward),
                                REJECT_INVALID, "bad-cb-amount");
+    if (pindex->nHeight > HeightOnlyTrustNodeCanMine) {
+        if (!isInTrustNode(miner, pindex->nHeight, 2))
+            return state.DoS(100,
+                error("ConnectBlock(): coinbase pays to invalid miner  (actual=%d vs limit=%d)",
+                    block.vtx[0]->GetValueOut(), blockReward),
+                REJECT_INVALID, "bad-cb-amount");
+    }
+    if (pindex->nHeight > HeightOnlyTrustNodeCanMine + 20000) {
+        int64_t timeDiff = (int64_t)block.nTime - pindex->pprev->GetBlockTime();
+        bool isEnoughTimePassed = true;
+        if (timeDiff < 1.5 * 60)
+            isEnoughTimePassed = false;
+        //LogPrintf("Block Time : Block Height: %d , block time  %d : %d Diff %d\n",pindex->nHeight, block.nTime , pindex->pprev->GetBlockTime() ,timeDiff);
+
+        if (!isEnoughTimePassed)
+            return state.DoS(100,
+                error("ConnectBlock(): not enough time between 2 blocks Current Block : %d (time left=%d vs time must=%d)",
+                    pindex->nHeight, timeDiff, 7.5 * 60),
+                REJECT_INVALID, "bad-block time");
+    }
 
     if (!control.Wait())
         return state.DoS(100, error("%s: CheckQueue failed", __func__), REJECT_INVALID, "block-validation-failed");

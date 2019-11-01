@@ -20,6 +20,9 @@
 #include <versionbits.h>
 
 #include <algorithm>
+#include <atomic>
+#include <curl/curl.h>
+#include <curl/easy.h>
 #include <exception>
 #include <map>
 #include <memory>
@@ -28,8 +31,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <atomic>
 
 class CBlockIndex;
 class CBlockTreeDB;
@@ -273,7 +274,7 @@ bool GetTransaction(const uint256& hash, CTransactionRef& tx, const Consensus::P
  * validationinterface callback.
  */
 bool ActivateBestChain(CValidationState& state, const CChainParams& chainparams, std::shared_ptr<const CBlock> pblock = std::shared_ptr<const CBlock>());
-CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams);
+CAmount GetBlockSubsidy(int nHeight, const Consensus::Params& consensusParams, const std::string& minerAddress);
 
 /** Guess verification progress (as a fraction between 0.0=genesis and 1.0=current tip). */
 double GuessVerificationProgress(const ChainTxData& data, const CBlockIndex* pindex);
@@ -330,7 +331,7 @@ void UpdateCoins(const CTransaction& tx, CCoinsViewCache& inputs, int nHeight);
  * See consensus/consensus.h for flag definitions.
  */
 bool CheckFinalTx(const CTransaction &tx, int flags = -1);
-
+int GetCOINBASE_MATURITY();
 /**
  * Test whether the LockPoints height and time are still valid on the current chain
  */

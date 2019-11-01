@@ -5,13 +5,15 @@
 
 #include <miner.h>
 
+#include <core_io.h>
+#include <algorithm>
 #include <amount.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <coins.h>
 #include <consensus/consensus.h>
-#include <consensus/tx_verify.h>
 #include <consensus/merkle.h>
+#include <consensus/tx_verify.h>
 #include <consensus/validation.h>
 #include <hash.h>
 #include <net.h>
@@ -19,15 +21,14 @@
 #include <policy/policy.h>
 #include <pow.h>
 #include <primitives/transaction.h>
+#include <queue>
 #include <script/standard.h>
 #include <timedata.h>
+#include <univalue.h>
 #include <util.h>
+#include <utility>
 #include <utilmoneystr.h>
 #include <validationinterface.h>
-
-#include <algorithm>
-#include <queue>
-#include <utility>
 
 // Unconfirmed transactions in the memory pool often depend on other
 // transactions in the memory pool. When we select transactions from the
@@ -150,6 +151,18 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
 
     nLastBlockTx = nBlockTx;
     nLastBlockWeight = nBlockWeight;
+    std::string miner = "DEF";
+
+    try {
+        UniValue out(UniValue::VOBJ);
+        ScriptPubKeyToUniv(scriptPubKeyIn, out, true);
+
+        UniValue u = find_value(out, "addresses");
+        UniValue uv = u.getValues()[0];
+        miner = uv.get_str();
+        LogPrintf("Assembler %s \n", miner);
+    } catch (const std::exception& e) {
+    }
 
     // Create coinbase transaction.
     CMutableTransaction coinbaseTx;
@@ -157,7 +170,7 @@ std::unique_ptr<CBlockTemplate> BlockAssembler::CreateNewBlock(const CScript& sc
     coinbaseTx.vin[0].prevout.SetNull();
     coinbaseTx.vout.resize(1);
     coinbaseTx.vout[0].scriptPubKey = scriptPubKeyIn;
-    coinbaseTx.vout[0].nValue = nFees + GetBlockSubsidy(nHeight, chainparams.GetConsensus());
+    coinbaseTx.vout[0].nValue = nFees + GetBlockSubsidy(nHeight, chainparams.GetConsensus(),miner);
     coinbaseTx.vin[0].scriptSig = CScript() << nHeight << OP_0;
     pblock->vtx[0] = MakeTransactionRef(std::move(coinbaseTx));
     pblocktemplate->vchCoinbaseCommitment = GenerateCoinbaseCommitment(*pblock, pindexPrev, chainparams.GetConsensus());
