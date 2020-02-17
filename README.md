@@ -20,8 +20,6 @@ the CounosX Core software, see [https://counos.io](https://counos.io).
 Official Nodes
 -------------
 
-95.216.237.187counosx-cli addnode 95.216.237.187 add
-
 95.216.122.130
 
 95.216.250.34	
@@ -29,6 +27,7 @@ Official Nodes
 95.216.250.35
 
 95.216.240.82
+
 you can add these nodes by this command:
 
 counosx-cli addnode 95.216.237.187 add
@@ -36,7 +35,7 @@ counosx-cli addnode 95.216.237.187 add
 Block Explorer
 -------------
 
-http://blockex.ccx.counos.org
+https://ccxxblocks.counos.org
 
 
 License
