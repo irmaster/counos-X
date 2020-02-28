@@ -28,6 +28,20 @@ Official Nodes
 
 95.216.240.82
 
+95.216.122.135
+
+95.216.122.138
+
+95.216.122.142
+
+5.9.227.227
+
+5.9.227.228
+
+5.9.227.230
+
+51.89.161.147
+
 you can add these nodes by this command:
 
 counosx-cli addnode 95.216.237.187 add
