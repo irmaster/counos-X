@@ -2192,7 +2192,7 @@ bool CChainState::ConnectBlock(const CBlock& block, CValidationState& state, CBl
         if (!isEnoughTimePassed)
             return state.DoS(100,
                 error("ConnectBlock(): not enough time between 2 blocks Current Block : %d (time left=%d vs time must=%d)",
-                    pindex->nHeight, timeDiff, 7.5 * 60),
+                    pindex->nHeight, timeDiff, 1.5 * 60),
                 REJECT_INVALID, "bad-block time");
     }
 

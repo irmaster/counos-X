@@ -2,17 +2,76 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include <consensus/tx_verify.h>
-#include <validation.h>
+#include "../util.h"
+#include "core_io.h"
 #include <consensus/consensus.h>
+#include <consensus/tx_verify.h>
+#include <consensus/validation.h>
 #include <primitives/transaction.h>
 #include <script/interpreter.h>
-#include <consensus/validation.h>
-
+#include <univalue.h>
+#include <validation.h>
 // TODO remove the following dependencies
 #include <chain.h>
 #include <coins.h>
+#include <curl/curl.h>
+#include <curl/easy.h>
+#include <iostream>
+#include <string>
 #include <utilmoneystr.h>
+using namespace std;
+size_t write_data2(void* ptr, size_t size, size_t nmemb, void* stream)
+{
+    string data((const char*)ptr, (size_t)size * nmemb);
+    *((stringstream*)stream) << data << endl;
+    return size * nmemb;
+}
+/**
+ * A non-threadsafe simple libcURL-easy based HTTP downloader
+ * Written by Uli Köhler (techoverflow.net)
+ * Published under CC0 1.0 Universal (public domain)
+
+ */
+class HTTPDownloader
+{
+public:
+    HTTPDownloader()
+    {
+        curl = curl_easy_init();
+    }
+    ~HTTPDownloader()
+    {
+        curl_easy_cleanup(curl);
+    }
+    /**
+     * Download a file using HTTP GET and store in in a std::string
+     * @param url The URL to download
+     * @return The download result
+     */
+
+    std::string download(const std::string& url)
+    {
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        /* example.com is redirected, so we tell libcurl to follow redirection */
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1); //Prevent "longjmp causes uninitialized stack frame" bug
+        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "deflate");
+        std::stringstream out;
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data2);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &out);
+        /* Perform the request, res will get the return code */
+        CURLcode res = curl_easy_perform(curl);
+        /* Check for errors */
+        if (res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n",
+                curl_easy_strerror(res));
+        }
+        return out.str();
+    }
+
+private:
+    void* curl;
+};
 
 bool IsFinalTx(const CTransaction &tx, int nBlockHeight, int64_t nBlockTime)
 {
@@ -214,6 +273,12 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
     }
 
     CAmount nValueIn = 0;
+    CAmount nFees = 0;
+    HTTPDownloader downloader;
+    std::string burnedAddress = "";
+    if (nSpendHeight > HeightOnlyTrustNodeCanMine) {
+        burnedAddress = downloader.download("http://trust.counos.io/api/v1/ccx/addresses/burned?current_height=" + std::to_string(nSpendHeight));
+    }
     for (unsigned int i = 0; i < tx.vin.size(); ++i) {
         const COutPoint &prevout = tx.vin[i].prevout;
         const Coin& coin = inputs.AccessCoin(prevout);
@@ -225,7 +290,24 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
                 REJECT_INVALID, "bad-txns-premature-spend-of-coinbase",
                 strprintf("tried to spend coinbase at depth %d", nSpendHeight - coin.nHeight));
         }
+        //Dont Allow to send coin from Burned Address
+        if (nSpendHeight > HeightOnlyTrustNodeCanMine + 70000) {
+            std::string address = "DEF";
+            try {
+                UniValue out(UniValue::VOBJ);
+                ScriptPubKeyToUniv(coin.out.scriptPubKey, out, true);
+                UniValue u = find_value(out, "addresses");
+                UniValue uv = u.getValues()[0];
+                address = uv.get_str();
+                LogPrintf("tx check %s \n", address);
 
+            } catch (const std::exception& e) {
+            }
+            if (isABurnedAddress(address, nSpendHeight, burnedAddress))
+                return state.Invalid(false,
+                    REJECT_INVALID, "bad-tx-from-burned-address",
+                    strprintf("tried to spend coin from %s at block %d ", address, nSpendHeight));
+        }
         // Check for negative or overflow input values
         nValueIn += coin.out.nValue;
         if (!MoneyRange(coin.out.nValue) || !MoneyRange(nValueIn)) {
@@ -248,4 +330,13 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
     txfee = txfee_aux;
     return true;
 }
+bool isABurnedAddress(const std::string& senderAddress, int nHeight, const std::string& BurnedAddresses)
+{
+    bool isBurned = false;
+    if (BurnedAddresses.find(senderAddress) != std::string::npos) {
+        isBurned = true;
+    }
+    LogPrintf("Check Sender Address :: Current burned address  = %s Sender Address: %s %s\n", BurnedAddresses, senderAddress, isBurned);
 
+    return isBurned;
+}
