@@ -2,13 +2,13 @@
 
 set -ex
 
-if [ ! -e "counosx/.counosx/counosx.conf" ]; then
-    mkdir -p counosx/.counosx
+if [ ! -e "/counosx/.counosx/counosx.conf" ]; then
+    mkdir -p /counosx/.counosx
 
 	echo "Creating counosx.conf"
 
 	# Seed a random password for JSON RPC server
-	cat <<EOF > counosx/.counosx/counosx.conf
+	cat <<EOF > /counosx/.counosx/counosx.conf
 		printtoconsole=1
 		prune=800
 
@@ -32,7 +32,7 @@ if [ ! -e "counosx/.counosx/counosx.conf" ]; then
 EOF
 fi
 
-cat counosx/.counosx/counosx.conf
+cat /counosx/.counosx/counosx.conf
 
 echo "Initialization completed successfully"
 
