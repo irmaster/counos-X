@@ -57,6 +57,8 @@ RUN make
 RUN make install
 
 
-EXPOSE 9333
+EXPOSE 9334
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+RUN chmod -R 777 /counosx/docker-entrypoint.sh
+
+ENTRYPOINT [./docker-entrypoint.sh]
