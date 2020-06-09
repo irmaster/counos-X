@@ -43,4 +43,4 @@ else
     args=("-rpcallowip=::/0")
 fi
 
-exec counosx/src/counosxd "${args[@]}"
+exec /counosx/src/counosxd "${args[@]}"

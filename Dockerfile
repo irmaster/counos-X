@@ -61,4 +61,4 @@ EXPOSE 9334
 
 RUN chmod -R 777 /counosx/docker-entrypoint.sh
 
-ENTRYPOINT [./docker-entrypoint.sh]
+# ENTRYPOINT ["./docker-entrypoint.sh"]
